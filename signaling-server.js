@@ -67,9 +67,16 @@ wss.on('connection', (ws) => {
       case 'find-user': handleFindUser(ws, message); break;
       case 'list-users': handleListUsers(ws); break;
       case 'signal': handleSignal(ws, message); break;
+      case 'chat-message': handleChatMessage(ws, message); break;
       case 'dht-put': handleDhtPut(ws, message); break;
       case 'dht-get': handleDhtGet(ws, message); break;
       case 'ping': ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() })); break;
+      case 'pong':
+        // Client responded to our heartbeat — update lastSeen
+        if (userPublicKey && users.has(userPublicKey)) {
+          users.get(userPublicKey).lastSeen = Date.now();
+        }
+        break;
       default: sendError(ws, `Unknown message type: ${message.type}`);
     }
   }
@@ -150,6 +157,25 @@ wss.on('connection', (ws) => {
     } else {
       if (!pendingSignals.has(to)) pendingSignals.set(to, []);
       pendingSignals.get(to).push({ type: 'signal', from, signal, timestamp: Date.now() });
+    }
+  }
+
+  function handleChatMessage(ws, message) {
+    const { to, from, content, messageId, timestamp } = message;
+    if (!to || !from || !content) { sendError(ws, 'Invalid chat-message'); return; }
+
+    const targetUser = users.get(to);
+    const payload = JSON.stringify({ type: 'chat-message', from, content, messageId, timestamp });
+
+    if (targetUser && targetUser.ws.readyState === WebSocket.OPEN) {
+      targetUser.ws.send(payload);
+      // Ack to sender
+      ws.send(JSON.stringify({ type: 'chat-message-ack', messageId, delivered: true }));
+    } else {
+      // Queue for offline delivery (reuse pendingSignals)
+      if (!pendingSignals.has(to)) pendingSignals.set(to, []);
+      pendingSignals.get(to).push({ type: 'chat-message', from, content, messageId, timestamp, timestamp: Date.now() });
+      ws.send(JSON.stringify({ type: 'chat-message-ack', messageId, delivered: false, queued: true }));
     }
   }
 
