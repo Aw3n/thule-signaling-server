@@ -1,0 +1,23 @@
+{
+  "name": "thule-signaling-server",
+  "version": "1.0.0",
+  "description": "WebRTC signaling server for Thule Messenger",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node signaling-server.js",
+    "dev": "nodemon signaling-server.js"
+  },
+  "keywords": [
+    "webrtc",
+    "signaling",
+    "p2p"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
