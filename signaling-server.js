@@ -12,6 +12,10 @@ const PORT = process.env.PORT || 8080;
 const users = new Map(); // publicKey -> { ws, username, lastSeen }
 const pendingSignals = new Map(); // targetPublicKey -> [signals]
 
+// Shared DHT store — key/value pairs shared across all clients
+// Used for pre-key bundles and message queues
+const dhtStore = new Map(); // keyHex -> { value: Buffer, timestamp: number }
+
 // Create HTTP server
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
@@ -63,6 +67,8 @@ wss.on('connection', (ws) => {
       case 'find-user': handleFindUser(ws, message); break;
       case 'list-users': handleListUsers(ws); break;
       case 'signal': handleSignal(ws, message); break;
+      case 'dht-put': handleDhtPut(ws, message); break;
+      case 'dht-get': handleDhtGet(ws, message); break;
       case 'ping': ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() })); break;
       default: sendError(ws, `Unknown message type: ${message.type}`);
     }
@@ -147,6 +153,25 @@ wss.on('connection', (ws) => {
     }
   }
 
+  function handleDhtPut(ws, message) {
+    const { key, value } = message;
+    if (!key || value === undefined) { sendError(ws, 'Invalid dht-put message'); return; }
+    dhtStore.set(key, { value: Buffer.from(value, 'base64'), timestamp: Date.now() });
+    ws.send(JSON.stringify({ type: 'dht-put-ack', key }));
+  }
+
+  function handleDhtGet(ws, message) {
+    const { key, requestId } = message;
+    if (!key) { sendError(ws, 'Invalid dht-get message'); return; }
+    const entry = dhtStore.get(key);
+    ws.send(JSON.stringify({
+      type: 'dht-get-result',
+      key,
+      requestId,
+      value: entry ? entry.value.toString('base64') : null
+    }));
+  }
+
   function sendError(ws, message) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'error', message }));
@@ -170,6 +195,10 @@ setInterval(() => {
     const filtered = signals.filter(s => (now - (s.timestamp || 0)) < 5 * 60 * 1000);
     if (filtered.length === 0) pendingSignals.delete(publicKey);
     else pendingSignals.set(publicKey, filtered);
+  });
+  // Cleanup DHT entries older than 24 hours
+  dhtStore.forEach((entry, key) => {
+    if (now - entry.timestamp > 24 * 60 * 60 * 1000) dhtStore.delete(key);
   });
 }, 5 * 60 * 1000);
 
